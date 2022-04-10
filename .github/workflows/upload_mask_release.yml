@@ -1,0 +1,54 @@
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+#     branches: [master] 
+    tags:
+    - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+name: Upload Release Asset
+
+jobs:
+  build-for-Linux:
+    name: Upload Mask Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: Installing utilities
+        run: |
+          sudo pip3 install setuptools
+          sudo pip3 install conan
+      - name: Build
+        id: build
+        run: |
+          cmake --no-warn-unused-cli -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE -DCMAKE_BUILD_TYPE:STRING=Release -DCMAKE_C_COMPILER:FILEPATH=/usr/bin/gcc-9 -DCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/g++-9 -DCMAKE_SYSTEM_NAME:STRING=Linux -H$GITHUB_WORKSPACE -B$GITHUB_WORKSPACE/build -G "Unix Makefiles"
+          cmake --build $GITHUB_WORKSPACE/build --config Release --target Generate_GDS -- -j 6
+      - name: Export Mask
+        id: export_mask
+        run: |
+          mask_filename=$(grep MASK_FILENAME $GITHUB_WORKSPACE/build/CMakeCache.txt | cut -d "=" -f2)
+          tar -czvf $mask_filename.tar.gz $mask_filename
+          zip $mask_filename.zip $mask_filename
+          echo "::set-output name=mask_name::$mask_filename.zip"
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        id: upload-release-asset 
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with: 
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: ${{ steps.export_mask.outputs.mask_name }}
+          asset_name: ${{ steps.export_mask.outputs.mask_name }}
+          asset_content_type: application/excutable
